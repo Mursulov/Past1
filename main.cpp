@@ -1,8 +1,128 @@
 #include <iostream>
 #include <bitset>
-#include <random>
+#include <string>
+#include <cstdint>
+#include <windows.h>
 
+std::string get_bits_win_live(int max_len = 64) {
+    std::string bits;
+    std::cout << "Введите битовую строку (только 0 и 1, максимум " << max_len << " бит):\n";
+    std::cout << "Backspace — удалить символ, Enter — завершить ввод.\n";
+    std::cout.flush();
 
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode;
+    GetConsoleMode(hStdin, &mode);
+    SetConsoleMode(hStdin, mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
+
+    while (true) {
+        INPUT_RECORD ir;
+        DWORD cnt;
+        ReadConsoleInput(hStdin, &ir, 1, &cnt);
+
+        if (ir.EventType == KEY_EVENT && ir.Event.KeyEvent.bKeyDown) {
+            char ch = ir.Event.KeyEvent.uChar.AsciiChar;
+            if (ch == '\r' || ch == '\n') {
+                if (!bits.empty()) {
+                    std::cout << std::endl;
+                    break;
+                }
+            } else if ((ch == 8 || ch == 127) && !bits.empty()) { // Backspace
+                bits.pop_back();
+            } else if ((ch == '0' || ch == '1') && (int)bits.size() < max_len) {
+                bits += ch;
+            }
+          
+            std::cout << "\r" << bits;
+            std::cout << std::string(max_len - bits.size(), ' ') << "  [" << bits.size() << "/" << max_len << "]";
+            std::cout.flush();
+        }
+    }
+
+    SetConsoleMode(hStdin, mode);
+    std::cout << std::endl;
+    return bits;
+}
+
+std::bitset<64> input_bitset64_win_live() {
+    while (true) {
+        std::string bits = get_bits_win_live(64);
+        if (bits.empty()) {
+            std::cout << "Пустой ввод! Попробуйте снова.\n";
+            continue;
+        }
+        if (bits.size() > 64) {
+            std::cout << "Введено больше 64 бит! Повторите ввод.\n";
+            continue;
+        }
+        if (bits.size() < 64) {
+            std::cout << "Введено " << bits.size() << " бит(а/ов). Как поступить?\n";
+            std::cout << "1) Дополнить нулями до 64 (в конец)\n";
+            std::cout << "2) Ввести недостающие биты вручную\n";
+            std::cout << "Выберите 1 или 2: ";
+            int choice = 0;
+            std::cin >> choice;
+            std::cin.ignore(1000, '\n');
+            if (choice == 1) {
+                bits.append(64 - bits.size(), '0');
+                std::cout << "Вектор дополнен нулями до 64 бит: " << bits << "\n";
+            } else {
+                while (bits.size() < 64) {
+                    std::cout << "Осталось " << (64 - bits.size()) << " бит(а/ов). Введите ещё: ";
+                    std::string extra = get_bits_win_live(64 - bits.size());
+                    bits += extra;
+                    std::cout << "Вы ввели всего " << bits.size() << " бит(а/ов).\n";
+                }
+                std::cout << "Итоговый вектор: " << bits << "\n";
+            }
+        }
+        return std::bitset<64>(bits);
+    }
+}
+
+uint64_t comb(int n, int k) {
+    if (k < 0 || k > n) return 0;
+    if (k == 0 || k == n) return 1;
+    uint64_t res = 1;
+    for (int i = 1; i <= k; ++i) {
+        res = res * (n - i + 1) / i;
+    }
+    return res;
+}
+
+uint64_t count_vectors_in_sphere(const std::bitset<64>& x, int r, int w, bool verbose = true) {
+    int n = 64;
+    int s = static_cast<int>(x.count());
+    uint64_t total = 0;
+    if (verbose) {
+        std::cout << "\nАнализ диапазонов для перебора d (расстояния):\n";
+    }
+    for (int d = 0; d <= r; ++d) {
+        int k_numer = s + d - w;
+        if (verbose) {
+            std::cout << "d = " << d << ": ";
+        }
+        if (k_numer % 2 != 0) {
+            if (verbose) std::cout << "k не целое\n";
+            continue;
+        }
+        int k = k_numer / 2;
+        int min_k = std::max(0, d - (n - s));
+        int max_k = std::min(d, s);
+        if (verbose) {
+            std::cout << "k = (s + d - w)/2 = (" << s << " + " << d << " - " << w << ")/2 = " << k;
+            std::cout << " | Диапазон: min_k = " << min_k << ", max_k = " << max_k << ". ";
+        }
+        if (k < min_k || k > max_k) {
+            if (verbose) std::cout << "k вне диапазона\n";
+            continue;
+        }
+        uint64_t ways = comb(s, k) * comb(n - s, d - k);
+        total += ways;
+        if (verbose) std::cout << "Добавлено " << ways << " вариантов\n";
+    }
+    return total;
+}
 
 void print_vector(const std::bitset<64>& v, const std::string& label = "Вектор") {
     std::cout << label << " (битовая строка): ";
@@ -13,66 +133,30 @@ void print_vector(const std::bitset<64>& v, const std::string& label = "Вект
     std::cout << std::endl;
 }
 
-int count_weight_in_sphere(const std::bitset<64>& x, int r, int w) {
-    int n = 64;
-    int s = static_cast<int>(x.count());
-    int result = 0;
-    for (int d = 0; d <= r; ++d) {
-        for (int k = 0; k <= d; ++k) {
-            if (s + d - 2 * k == w && k <= s && (d - k) <= n - s) {
-                uint64_t ways = 1;
-                for (int i = 0; i < k; ++i) ways = ways * (s - i) / (i + 1);
-                for (int i = 0; i < d - k; ++i) ways = ways * (n - s - i) / (i + 1);
-                result += static_cast<int>(ways);
-            }
-        }
-    }
-    return result;
-}
-
-std::bitset<64> random_bitset64() {
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<uint64_t> distrib(0, ~0ULL);
-    uint64_t value = distrib(gen);
-    return std::bitset<64>(value);
-}
-
 int main() {
- 
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
-    std::bitset<64> x = random_bitset64();
-    int n = 64;
+    std::cout << "==== Количество наборов веса w в сфере радиуса r вокруг x ====\n";
+    std::bitset<64> x = input_bitset64_win_live();
+    print_vector(x, "Исходный вектор");
     int s = static_cast<int>(x.count());
-    const int r_max = 10;
+    std::cout << "Вес исходного вектора (число единиц): " << s << "\n";
 
-    int r, w, answer = 0, attempts = 0;
+    int r, w;
     do {
-        std::uniform_int_distribution<> distr_r(1, r_max);
-        r = distr_r(gen);
+        std::cout << "Введите радиус r (1 <= r <= 64): ";
+        std::cin >> r;
+        std::cin.ignore(1000, '\n');
+    } while (r < 1 || r > 64);
 
-        int w_min = std::max(0, s - r);
-        int w_max = std::min(n, s + r);
-        std::uniform_int_distribution<> distr_w(w_min, w_max);
-        w = distr_w(gen);
+    do {
+        std::cout << "Введите желаемый вес w (0 <= w <= " << s << "): ";
+        std::cin >> w;
+        std::cin.ignore(1000, '\n');
+    } while (w < 0 || w > s);
 
-        answer = count_weight_in_sphere(x, r, w);
-        ++attempts;
-    } while (answer == 0 && attempts < 100);
-
-    std::cout << "Случайный 64-битный вектор:\n";
-    print_vector(x, "x");
-
-    std::cout << "\nАвтоматически подобраны параметры:\n";
-    std::cout << "Вес исходного вектора (число единиц): " << s << std::endl;
-    std::cout << "Радиус r: " << r << std::endl;
-    std::cout << "Вес w: " << w << std::endl;
-
-    std::cout << "\nРезультат:\n";
-    std::cout << "Количество наборов веса " << w << " в сфере радиуса " << r << " вокруг x: " << answer << std::endl;
-
+    uint64_t ans = count_vectors_in_sphere(x, r, w, true);
+    std::cout << "\nОтвет: S_F(x) = " << ans << " наборов веса " << w << " в сфере радиуса " << r << " вокруг x\n";
     return 0;
 }
